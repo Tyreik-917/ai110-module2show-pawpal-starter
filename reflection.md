@@ -7,6 +7,23 @@
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+User actions: Enter and Manage Pet Profile Information, Add and Edit Care Tasks, Generate and View the Daily Schedule
+
+UML design: 
+    Classes: Owner, Pet, Task, Scheduler
+
+    Owner:
+        Class Attributes: Owners name
+        Class Methods: set and get the Owners name
+    Pet: 
+        Class Attributes: Pets name
+        Class Methods: set and get the Pets name
+    Task:
+        Class Attributes: Pet (to assign task for that specific pet)
+        Class Methods: set and gets tasks, add/edit tasks (duration + priority at minimum)
+    Scheduler:
+        Class Attributes: Task
+        Class Methods: Generate a daily schedule/plan based on constraints and priorities
 **b. Design changes**
 
 - Did your design change during implementation?

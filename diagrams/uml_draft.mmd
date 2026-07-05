@@ -1,0 +1,36 @@
+classDiagram
+    %% PawPal+ — helps a pet owner plan daily care tasks for their pet.
+
+    class Owner {
+        -str name
+        +set_name(str name) void
+        +get_name() str
+    }
+
+    class Pet {
+        -str name
+        +set_name(str name) void
+        +get_name() str
+    }
+
+    class Task {
+        -Pet pet
+        -str name
+        -int duration
+        -int priority
+        +set_task(str name, int duration, int priority) void
+        +get_task() dict
+        +add_task(str name, int duration, int priority) void
+        +edit_task(int duration, int priority) void
+    }
+
+    class Scheduler {
+        -Task[] tasks
+        +add_task(Task task) void
+        +generate_schedule() list
+    }
+
+    Owner "1" --> "1" Pet : owns
+    Pet "1" --> "*" Task : has
+    Task "*" --> "1" Pet : assigned to
+    Scheduler "1" o-- "*" Task : schedules
