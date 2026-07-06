@@ -1,4 +1,8 @@
+from datetime import date
+
 import streamlit as st
+
+from pawpal_system import Owner, Pet, Task, Scheduler
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -43,11 +47,27 @@ owner_name = st.text_input("Owner name", value="Jordan")
 pet_name = st.text_input("Pet name", value="Mochi")
 species = st.selectbox("Species", ["dog", "cat", "other"])
 
+# Streamlit reruns this whole script top-to-bottom on every interaction, so an
+# Owner created as a plain variable would be "reborn" empty each rerun. Instead
+# we keep ONE Owner in st.session_state (the per-session "vault") and only build
+# it the first time — the `not in` check is how we tell "first run" apart from
+# "a later rerun where the object already exists."
+if "owner" not in st.session_state:
+    st.session_state.owner = Owner(owner_name)
+owner = st.session_state.owner            # reuse the persisted instance
+owner.set_name(owner_name)                # keep its name synced with the input
+
+# Same "check the vault first" pattern for the Pet: create it once, attach it to
+# the owner once, then just keep its details synced with the inputs each rerun.
+if "pet" not in st.session_state:
+    st.session_state.pet = Pet(pet_name, species)
+    owner.add_pet(st.session_state.pet)
+pet = st.session_state.pet
+pet.set_name(pet_name)
+pet.species = species
+
 st.markdown("### Tasks")
 st.caption("Add a few tasks. In your final version, these should feed into your scheduler.")
-
-if "tasks" not in st.session_state:
-    st.session_state.tasks = []
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -57,32 +77,66 @@ with col2:
 with col3:
     priority = st.selectbox("Priority", ["low", "medium", "high"], index=2)
 
-if st.button("Add task"):
-    st.session_state.tasks.append(
-        {"title": task_title, "duration_minutes": int(duration), "priority": priority}
-    )
+col4, col5 = st.columns(2)
+with col4:
+    frequency = st.selectbox("Frequency", ["daily", "weekly"], index=0)
+with col5:
+    # Optional start time as "HH:MM"; leave blank for an unscheduled task.
+    start_time = st.text_input("Start time (HH:MM, optional)", value="")
 
-if st.session_state.tasks:
-    st.write("Current tasks:")
-    st.table(st.session_state.tasks)
+# Build a real Task and hand it to the pet — no more loose dicts. The task lives
+# on the persisted Pet, so it survives reruns automatically.
+if st.button("Add task"):
+    pet.add_task(Task(
+        description=task_title,
+        duration=int(duration),
+        priority=priority,
+        frequency=frequency,
+        time=start_time.strip(),
+    ))
+
+tasks = pet.get_tasks()
+if tasks:
+    st.write(f"Current tasks for {pet.get_name()}:")
+    st.table([t.to_dict() for t in tasks])
 else:
     st.info("No tasks yet. Add one above.")
 
 st.divider()
 
 st.subheader("Build Schedule")
-st.caption("This button should call your scheduling logic once you implement it.")
+st.caption(
+    "Shows only tasks due today, ordered by priority (high first), grouped by pet, "
+    "then shortest duration."
+)
+
+# Time budget is opt-in so "0 minutes" can mean a real empty day rather than
+# being overloaded as "no limit."
+limit_time = st.checkbox("Limit my time today")
+budget = None
+if limit_time:
+    budget = st.number_input(
+        "Time available today (minutes)", min_value=0, max_value=1440, value=60
+    )
 
 if st.button("Generate schedule"):
-    st.warning(
-        "Not implemented yet. Next step: create your scheduling logic (classes/functions) and call it here."
-    )
-    st.markdown(
-        """
-Suggested approach:
-1. Design your UML (draft).
-2. Create class stubs (no logic).
-3. Implement scheduling behavior.
-4. Connect your scheduler here and display results.
-"""
-    )
+    scheduler = Scheduler()
+    today = date.today()
+    schedule = scheduler.generate_schedule(owner, available_minutes=budget, today=today)
+
+    # Surface overlapping / malformed start times so the owner can fix them.
+    # Lightweight check: returns messages instead of raising on bad input.
+    for message in scheduler.conflict_warnings(owner, today=today):
+        st.warning(message)
+
+    if schedule:
+        st.success(f"Today's schedule for {owner.get_name()} — {len(schedule)} task(s)")
+        for i, entry in enumerate(schedule, start=1):
+            when = f"{entry['time']} · " if entry["time"] else ""
+            st.markdown(
+                f"**{i}. {entry['description']}** — {entry['pet']} "
+                f"· {when}{entry['duration']} min · {entry['priority']} priority "
+                f"· {entry['frequency']}"
+            )
+    else:
+        st.info("No tasks to schedule yet. Add some tasks above first.")

@@ -46,6 +46,14 @@ pip install -r requirements.txt
 
 Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
 
+========================================
+Today's Schedule for Alex
+========================================
+1. [ HIGH ] Feed for Mia (10 min, daily)
+2. [ HIGH ] Morning walk for Rex (30 min, daily)
+3. [ LOW  ] Vet checkup for Rex (45 min, weekly)
+========================================
+
 ```
 # e.g.:
 # Daily plan for Biscuit (Golden Retriever):
@@ -72,14 +80,70 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
+All scheduling logic lives in [`pawpal_system.py`](pawpal_system.py). The core
+classes are `Task`, `Pet`, `Owner`, and the stateless `Scheduler`. Every feature
+below is exercised by [`tests/test_pawpal.py`](tests/test_pawpal.py) (40 tests) and
+demoed in [`main.py`](main.py).
 
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Task sorting | `Scheduler.organize(pairs, by="priority" \| "time")` | Priority-first or chronological |
+| Filtering | `Scheduler.filter_tasks`, `Scheduler.collect_tasks`, `Task.due_today`, `Pet.pending_tasks` | By pet, completion status, and frequency due-date |
+| Conflict handling | `Scheduler.conflict_warnings`, `Scheduler.find_conflicts`, `parse_time` | Overlaps + malformed times; warns, never crashes |
+| Recurring tasks | `Task.mark_complete`, `Task.next_occurrence`, `Scheduler.complete_task` | Daily/weekly auto-spawn the next occurrence |
+| Daily plan | `Scheduler.generate_schedule` | Greedy fill under a time budget |
+
+### Sorting behavior
+
+`Scheduler.organize(pairs, by=...)` returns the `(pet, task)` pairs in one of two
+orders:
+
+- **`by="priority"`** (default) — sorts by `(priority_rank, pet name, duration)`,
+  so high-priority tasks come first, a pet's tasks are **grouped together** (fewer
+  trips between pets), and shorter tasks lead within a tier. Priority ranking is
+  computed by `Task.priority_rank()` (`high`/`medium`/`low` → `0/1/2`, unknown →
+  medium).
+- **`by="time"`** — sorts chronologically using the module helper `to_minutes()`,
+  which converts a `"HH:MM"` start time to minutes since midnight; unscheduled
+  (blank) tasks sort last.
+
+### Filtering behavior
+
+- **By completion / by pet** — `Scheduler.filter_tasks(owner, completed=None,
+  pet_name=None)`. Both filters are optional and combine with AND;
+  `pet_name` is case-insensitive.
+- **For the daily plan** — `Scheduler.collect_tasks(owner, include_completed=False,
+  today=None)` drops completed tasks and, when a `today` date is supplied, tasks
+  not due today — in a single pass.
+- **Frequency due-date** — `Task.due_today(today)`: a `daily` task is due unless it
+  was already completed today; a `weekly` task is due if never completed or 7+ days
+  have passed.
+- **Pending only** — `Pet.pending_tasks()` returns a pet's not-yet-completed tasks.
+
+### Conflict detection logic
+
+- **`Scheduler.conflict_warnings(owner, today=None)`** — the crash-safe, human-facing
+  check. It returns a list of warning **strings** (empty when the day is clear) for
+  (a) tasks with an unparseable start time and (b) overlaps where one task's
+  `start + duration` runs past the next task's start. Times are parsed defensively
+  by `parse_time()`, so bad input like `"8am"` produces a warning instead of an
+  exception.
+- **`Scheduler.find_conflicts(pairs)`** — the underlying algorithm: sorts timed
+  tasks chronologically and sweeps adjacent pairs for overlap, returning the
+  conflicting `(pet, task)` pairs. `conflict_warnings` reuses it.
+
+### Recurring task logic
+
+Completing a recurring task automatically schedules its next occurrence:
+
+- **`Task.mark_complete(on_date=None)`** — marks the task done and, if it is
+  `daily`/`weekly` **and** attached to a pet, adds a fresh pending copy for the
+  next occurrence (the completed task stays as history) and returns it.
+- **`Task.next_occurrence(completion_date)`** — builds that copy, setting its
+  `last_completed` so `due_today` defers it to the next day (daily) or next week
+  (weekly) instead of reappearing immediately.
+- **`Scheduler.complete_task(pet, task, on_date=None)`** — a convenience wrapper
+  that ensures the back-reference is set, then delegates to `mark_complete`.
 
 ## 📸 Demo Walkthrough
 

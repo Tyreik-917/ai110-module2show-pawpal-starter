@@ -28,7 +28,7 @@ UML design:
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
-
+Yes, in my Pet class I aded a task collection
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
@@ -37,6 +37,23 @@ UML design:
 
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
 - How did you decide which constraints mattered most?
+
+**Hard constraints** (decide *whether* a task shows up):
+- Completion status: completed tasks are dropped from the plan by default.
+- Frequency / "due today": a task only appears if it's due — daily unless already done today, weekly only after 7+ days.
+- Time budget: if the owner sets how many minutes they have, tasks that don't fit are skipped.
+
+**Ordering constraints** (decide the *sequence* of what's included):
+- Priority: high-priority tasks are placed before medium and low ones.
+- Pet grouping: tasks for the same pet stay together so the owner finishes one pet at a time.
+- Duration: shorter tasks come first when priority is tied.
+- Start time: tasks can alternatively be ordered chronologically by their clock time.
+
+**Advisory constraints** (warn but don't block):
+- Conflict/format warnings: overlapping start times and invalid time formats are flagged instead of crashing.
+
+I decided priority mattered most because the whole point of the app is helping an owner do the important things first when time is short — so priority drives the
+ordering, and the time budget is the hard limit that everything else has to fit inside. Preferences (like "walk before breakfast") are the one thing I did not fully model; the pet-grouping heuristic is the closest I got, and it's something I'd add as an explicit constraint next.
 
 **b. Tradeoffs**
 
