@@ -22,6 +22,39 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## ✨ Features
+
+The scheduling algorithms implemented in [`pawpal_system.py`](pawpal_system.py):
+
+- **Priority sorting** — orders tasks by `(priority_rank, pet name, duration)`, so
+  high-priority tasks come first, each pet's tasks stay grouped together, and
+  shorter tasks lead within a tier (`Scheduler.organize(by="priority")`,
+  `Task.priority_rank`).
+- **Sorting by time** — chronological ordering that converts `"HH:MM"` start times
+  to minutes since midnight, with unscheduled/blank tasks pushed to the end
+  (`Scheduler.organize(by="time")`, `to_minutes`).
+- **Time-budget greedy fill** — given the minutes available today, greedily
+  includes only the tasks that fit within that budget, in priority order
+  (`Scheduler.generate_schedule(available_minutes=...)`).
+- **Due-today filtering** — decides which tasks belong in today's plan by
+  frequency: a daily task is due unless already done today; a weekly task is due if
+  never completed or 7+ days have passed (`Task.due_today`, `Scheduler.collect_tasks`).
+- **Daily & weekly recurrence** — completing a recurring task automatically spawns
+  a fresh pending copy for its next occurrence (next day / next week) while the
+  finished task stays as history; the copy inherits the pet back-reference so it
+  recurs again in turn (`Task.mark_complete`, `Task.next_occurrence`,
+  `Scheduler.complete_task`).
+- **Conflict detection** — sweeps chronologically-adjacent timed tasks and flags
+  any where one task's `start + duration` runs past the next task's start
+  (`Scheduler.find_conflicts`).
+- **Conflict warnings (crash-safe)** — a human-facing check that returns warning
+  strings (never raises) for overlapping windows and for unparseable start times,
+  filtering bad times out *before* overlap detection (`Scheduler.conflict_warnings`,
+  `parse_time`).
+- **Filtering by pet & completion** — retrieves `(pet, task)` pairs filtered by
+  completion status and/or case-insensitive pet name, combined with AND
+  (`Scheduler.filter_tasks`).
+
 ## Getting started
 
 ### Setup
@@ -247,12 +280,103 @@ Completing a recurring task automatically schedules its next occurrence:
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+### Main UI features (Streamlit — `app.py`)
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+Launch it with `streamlit run app.py`. The single-page app lets a user:
 
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
+- **Enter owner & pet info** — set the owner name, pet name, and species; these
+  persist across Streamlit reruns via `st.session_state`.
+- **Add tasks** — enter a title, duration, priority (low/medium/high), frequency
+  (daily/weekly), and an optional `HH:MM` start time, then click **Add task**.
+- **View & sort the task list** — a live table of the pet's tasks with priority
+  badges (🔴/🟡/🟢) and status (✅/⬜). A radio toggle re-sorts it **by priority**
+  or **by start time** on the fly.
+- **See conflict warnings inline** — overlapping or malformed start times surface
+  as warnings right under the task table (or a "no conflicts" note when clear).
+- **Generate today's schedule** — optionally cap the minutes available today, then
+  click **Generate schedule** to get a numbered plan with the total time required.
+
+### Example workflow
+
+1. **Add a pet** — enter owner "Alex" and pet "Rex" (dog).
+2. **Schedule tasks** — add "Morning walk" (30 min, high, 07:30) and "Vet checkup"
+   (45 min, low, weekly, 15:00); add a second pet "Mia" (cat) with "Feed"
+   (10 min, high, 07:00).
+3. **Sort the list** — toggle between priority order (Feed → Morning walk → Vet
+   checkup) and chronological order (07:00 → 07:30 → 15:00).
+4. **View today's schedule** — click **Generate schedule**; only tasks due today
+   appear, ordered by priority and tagged with the pet, plus the total minutes.
+5. **Complete a recurring task** — marking a daily task done drops it from today's
+   plan and auto-creates tomorrow's copy.
+
+### Key Scheduler behaviors shown
+
+- **Sorting** — `organize(by="priority")` groups a pet's tasks and leads with the
+  highest priority; `organize(by="time")` orders chronologically.
+- **Filtering** — `collect_tasks` / `filter_tasks` narrow tasks by completion,
+  pet name, and due-today frequency.
+- **Conflict warnings** — `conflict_warnings` reports overlaps and invalid times
+  without crashing.
+- **Daily recurrence** — completing a daily/weekly task auto-spawns its next
+  occurrence.
+
+### Sample CLI output (`python main.py`)
+
+`main.py` is a headless demo that exercises the same Scheduler logic end-to-end:
+
+```
+====================================================
+Tasks as entered (raw order)
+====================================================
+  1. [ LOW  ] Vet checkup for Rex (at 15:00, 45 min, weekly, pending)
+  2. [ HIGH ] Morning walk for Rex (at 07:30, 30 min, daily, pending)
+  3. [ LOW  ] Brush for Rex (at 20:00, 5 min, daily, done)
+  4. [MEDIUM] Evening play for Mia (at 18:00, 15 min, daily, pending)
+  5. [ HIGH ] Feed for Mia (at 07:00, 10 min, daily, pending)
+
+====================================================
+Sorted by PRIORITY (pending only)
+====================================================
+  1. [ HIGH ] Feed for Mia (at 07:00, 10 min, daily, pending)
+  2. [ HIGH ] Morning walk for Rex (at 07:30, 30 min, daily, pending)
+  3. [MEDIUM] Evening play for Mia (at 18:00, 15 min, daily, pending)
+  4. [ LOW  ] Vet checkup for Rex (at 15:00, 45 min, weekly, pending)
+
+====================================================
+Sorted by TIME (chronological)
+====================================================
+  1. [ HIGH ] Feed for Mia (at 07:00, 10 min, daily, pending)
+  2. [ HIGH ] Morning walk for Rex (at 07:30, 30 min, daily, pending)
+  3. [ LOW  ] Vet checkup for Rex (at 15:00, 45 min, weekly, pending)
+  4. [MEDIUM] Evening play for Mia (at 18:00, 15 min, daily, pending)
+
+====================================================
+Filtered: COMPLETED tasks only
+====================================================
+  1. [ LOW  ] Brush for Rex (at 20:00, 5 min, daily, done)
+
+====================================================
+Filtered: Rex's tasks only
+====================================================
+  1. [ LOW  ] Vet checkup for Rex (at 15:00, 45 min, weekly, pending)
+  2. [ HIGH ] Morning walk for Rex (at 07:30, 30 min, daily, pending)
+  3. [ LOW  ] Brush for Rex (at 20:00, 5 min, daily, done)
+
+====================================================
+Conflict warnings (overlaps + bad times, non-crashing)
+====================================================
+  ⚠️ Bo's 'Meds' has an invalid start time '8am' (expected HH:MM) — skipping it.
+  ⚠️ Time conflict: Bo's 'Walk' (07:00, 30 min) overlaps Bo's 'Vet call' (07:00) by 30 min.
+
+====================================================
+Recurrence: complete Mia's daily 'Feed'
+====================================================
+Mia's tasks before:
+  1. [MEDIUM] Evening play for Mia (at 18:00, 15 min, daily, pending)
+  2. [ HIGH ] Feed for Mia (at 07:00, 10 min, daily, pending)
+Mia's tasks after (original done, a fresh pending 'Feed' appears):
+  1. [MEDIUM] Evening play for Mia (at 18:00, 15 min, daily, pending)
+  2. [ HIGH ] Feed for Mia (at 07:00, 10 min, daily, done)
+  3. [ HIGH ] Feed for Mia (at 07:00, 10 min, daily, pending)
+====================================================
+```

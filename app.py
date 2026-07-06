@@ -8,6 +8,22 @@ st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 st.title("🐾 PawPal+")
 
+# Colored dots make priority scannable at a glance in the tables below.
+PRIORITY_BADGE = {"high": "🔴 High", "medium": "🟡 Medium", "low": "🟢 Low"}
+
+
+def task_row(pet_name, task_dict):
+    """Turn a task's raw fields into a polished, human-friendly table row."""
+    return {
+        "Task": task_dict["description"],
+        "Pet": pet_name,
+        "Priority": PRIORITY_BADGE.get(task_dict["priority"], task_dict["priority"]),
+        "Time": task_dict["time"] or "—",
+        "Duration": f"{task_dict['duration']} min",
+        "Frequency": task_dict["frequency"].capitalize(),
+        "Status": "✅ Done" if task_dict["completed"] else "⬜ Pending",
+    }
+
 st.markdown(
     """
 Welcome to the PawPal+ starter app.
@@ -97,8 +113,33 @@ if st.button("Add task"):
 
 tasks = pet.get_tasks()
 if tasks:
-    st.write(f"Current tasks for {pet.get_name()}:")
-    st.table([t.to_dict() for t in tasks])
+    scheduler = Scheduler()
+
+    # Let the owner choose the ordering, then delegate to Scheduler.organize so
+    # the display matches the same sorting the scheduler uses.
+    order_by = st.radio(
+        "Order tasks by",
+        options=["priority", "time"],
+        format_func=lambda o: "Priority (high first, grouped by pet)"
+        if o == "priority" else "Start time (chronological)",
+        horizontal=True,
+    )
+    pairs = [(pet, t) for t in tasks]
+    ordered = scheduler.organize(pairs, by=order_by)
+
+    pending = len(pet.pending_tasks())
+    st.success(
+        f"**{pet.get_name()}** has **{len(tasks)}** task(s) — "
+        f"{pending} pending, {len(tasks) - pending} done."
+    )
+    st.table([task_row(p.get_name(), task.to_dict()) for p, task in ordered])
+
+    # Surface any overlapping / malformed start times right next to the list.
+    warnings = scheduler.conflict_warnings(owner)
+    for message in warnings:
+        st.warning(message)
+    if not warnings:
+        st.caption("✅ No time conflicts detected.")
 else:
     st.info("No tasks yet. Add one above.")
 
@@ -130,13 +171,15 @@ if st.button("Generate schedule"):
         st.warning(message)
 
     if schedule:
-        st.success(f"Today's schedule for {owner.get_name()} — {len(schedule)} task(s)")
+        total_minutes = sum(entry["duration"] for entry in schedule)
+        st.success(
+            f"📅 Today's schedule for **{owner.get_name()}** — "
+            f"**{len(schedule)}** task(s), **{total_minutes} min** total."
+        )
+        rows = []
         for i, entry in enumerate(schedule, start=1):
-            when = f"{entry['time']} · " if entry["time"] else ""
-            st.markdown(
-                f"**{i}. {entry['description']}** — {entry['pet']} "
-                f"· {when}{entry['duration']} min · {entry['priority']} priority "
-                f"· {entry['frequency']}"
-            )
+            row = task_row(entry["pet"], entry)
+            rows.append({"#": i, **row})
+        st.table(rows)
     else:
         st.info("No tasks to schedule yet. Add some tasks above first.")
