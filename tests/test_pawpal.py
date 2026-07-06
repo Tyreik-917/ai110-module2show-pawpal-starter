@@ -399,3 +399,123 @@ def test_find_conflicts_allows_back_to_back():
     pet.add_task(Task("Feed", duration=10, time="08:30"))   # starts exactly at 08:30
     scheduler = Scheduler()
     assert scheduler.find_conflicts(scheduler.collect_tasks(owner)) == []
+
+
+# --- include_completed inclusion branch -------------------------------------
+
+def test_collect_tasks_include_completed_keeps_done_tasks():
+    """collect_tasks(include_completed=True) retains completed tasks.
+
+    The default drops them; the inclusion branch must keep both done and
+    pending tasks.
+    """
+    owner = _owner_with_tasks()
+    rex_walk = owner.get_pets()[0].get_tasks()[0]  # Rex's "Morning walk"
+    rex_walk.frequency = "once"                    # no recurrence copy to confuse the count
+    rex_walk.mark_complete()
+    scheduler = Scheduler()
+
+    # Default: the completed task is filtered out.
+    default = [t.description for _, t in scheduler.collect_tasks(owner)]
+    assert "Morning walk" not in default
+
+    # include_completed=True: it comes back.
+    included = [t.description for _, t in scheduler.collect_tasks(owner, include_completed=True)]
+    assert included.count("Morning walk") == 1
+    assert set(included) == {"Morning walk", "Vet checkup", "Feed"}
+
+
+def test_generate_schedule_include_completed_shows_done_tasks():
+    """generate_schedule(include_completed=True) plans completed tasks too."""
+    owner = _owner_with_tasks()
+    rex_walk = owner.get_pets()[0].get_tasks()[0]
+    rex_walk.frequency = "once"
+    rex_walk.mark_complete()
+
+    without = [e["description"] for e in Scheduler().generate_schedule(owner)]
+    assert "Morning walk" not in without
+
+    with_done = [e["description"] for e in Scheduler().generate_schedule(owner, include_completed=True)]
+    assert "Morning walk" in with_done
+    # The plan entry reflects its completed status.
+    walk_entry = next(e for e in
+                      Scheduler().generate_schedule(owner, include_completed=True)
+                      if e["description"] == "Morning walk")
+    assert walk_entry["completed"] is True
+
+
+# --- Empty owner / pets with no tasks ---------------------------------------
+
+def test_generate_schedule_empty_owner_returns_empty():
+    """An owner with no pets yields an empty plan (no crash)."""
+    assert Scheduler().generate_schedule(Owner("Nobody")) == []
+
+
+def test_generate_schedule_pets_without_tasks_returns_empty():
+    """Pets that have no tasks contribute nothing to the plan."""
+    owner = Owner("Alex")
+    owner.add_pet(Pet("Rex", "dog"))
+    owner.add_pet(Pet("Mia", "cat"))
+    assert Scheduler().generate_schedule(owner) == []
+
+
+# --- Chained recurrence (back-reference propagates to copies) ----------------
+
+def test_completing_spawned_copy_spawns_the_next_occurrence():
+    """Completing the auto-created copy spawns its own next occurrence.
+
+    Because next_occurrence's copy is attached via Pet.add_task, the copy also
+    gets a `_pet` back-reference, so completing it recurs again (day 3).
+    """
+    day1 = date(2026, 7, 5)
+    day2 = day1 + timedelta(days=1)
+    pet = Pet("Rex")
+    original = pet.add_task(Task("Feed", duration=10, frequency="daily", time="07:00"))
+
+    # Day 1: complete original -> spawns copy for day 2.
+    copy2 = original.mark_complete(on_date=day1)
+    assert copy2 is not None and copy2._pet is pet
+    assert len(pet.get_tasks()) == 2
+
+    # Day 2: complete the spawned copy -> it must itself spawn a day-3 copy.
+    copy3 = copy2.mark_complete(on_date=day2)
+    assert copy3 is not None and copy3.completed is False
+    assert copy3 is not copy2
+    assert len(pet.get_tasks()) == 3
+    # The third copy is due on day 3, not before.
+    assert copy3.due_today(day2) is False
+    assert copy3.due_today(day2 + timedelta(days=1)) is True
+
+
+# --- find_conflicts vs. invalid times ---------------------------------------
+
+def test_find_conflicts_reports_spurious_overlap_on_invalid_times():
+    """Raw find_conflicts can flag a bogus conflict when times are unparseable.
+
+    Invalid times fall back to to_minutes -> 1440, so two invalid-time tasks
+    collapse to the same slot and register a (spurious) overlap. This documents
+    why conflict_warnings must filter bad times out *before* overlap detection.
+    """
+    owner = Owner("Sam")
+    pet = owner.add_pet(Pet("Bo"))
+    pet.add_task(Task("A", duration=5, time="8am"))   # unparseable -> 1440
+    pet.add_task(Task("B", duration=5, time="9pm"))   # unparseable -> 1440
+    scheduler = Scheduler()
+    # find_conflicts is blind to validity and reports the spurious overlap.
+    assert len(scheduler.find_conflicts(scheduler.collect_tasks(owner))) == 1
+
+
+def test_conflict_warnings_does_not_report_overlap_for_invalid_times():
+    """conflict_warnings filters invalid times first, so no spurious overlap.
+
+    It should emit one invalid-time warning per bad task and *no* conflict
+    warning, unlike raw find_conflicts above.
+    """
+    owner = Owner("Sam")
+    pet = owner.add_pet(Pet("Bo"))
+    pet.add_task(Task("A", duration=5, time="8am"))
+    pet.add_task(Task("B", duration=5, time="9pm"))
+    warnings = Scheduler().conflict_warnings(owner)
+    assert len(warnings) == 2
+    assert all("invalid" in w.lower() for w in warnings)
+    assert not any("conflict" in w.lower() for w in warnings)
